@@ -10,7 +10,7 @@
       {{ title }} 
     </h1>
     {% load cache %}
-    {% cache 0 index_page %}
+    {% cache 20 index_page %}
     {% for post in page_obj %}
       <article>
         <ul>
