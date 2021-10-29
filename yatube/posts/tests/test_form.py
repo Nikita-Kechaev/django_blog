@@ -5,7 +5,6 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
-from django.core.cache import cache
 
 from posts.models import Group, Post, Comment
 
@@ -123,9 +122,8 @@ class PostCreateEditFormTests(TestCase):
 
     def test_image_form_context(self):
         """
-        Проверим, что при создании поста с картинкой, контекст
-        страниц на которых выводится указанный пост содержит
-        данную картинку.
+        Проверим, что в базе данных создаётся
+        корректный пост с картинкой.
         """
         post_count = Post.objects.count()
         small_gif = (
@@ -153,42 +151,18 @@ class PostCreateEditFormTests(TestCase):
             data=form_data,
             follow=True
         )
-        response_image_list = [
-            self.user_1_client.get(
-                reverse(
-                    'posts:index'
-                )
-            ).context.get('page_obj').object_list[0].image,
-            self.user_1_client.get(
-                reverse(
-                    'posts:group_list',
-                    kwargs={'slug': PostCreateEditFormTests.group}
-                )
-            ).context.get('page_obj').object_list[0].image,
-            self.user_1_client.get(
-                reverse(
-                    'posts:profile',
-                    kwargs={'username': PostCreateEditFormTests.user}
-                )
-            ).context.get('page_obj').object_list[0].image,
-            self.user_1_client.get(
-                reverse(
-                    'posts:post_detail',
-                    kwargs={'post_id': Post.objects.all()[0].id}
-                )
-            ).context['post'].image
-        ]
-        post_image_from_db = Post.objects.all()[0].image
         self.assertEqual(
             Post.objects.count(),
             post_count + 1
         )
-        for response_image in response_image_list:
-            with self.subTest():
-                self.assertEqual(
-                    post_image_from_db,
-                    response_image
-                )
+        self.assertTrue(
+            Post.objects.filter(
+                text=form_data['text'],
+                group=form_data['group'],
+                author=PostCreateEditFormTests.user,
+                image='posts/small.gif'
+            ).exists()
+        )
 
     def test_comment_create(self):
         """
@@ -207,41 +181,10 @@ class PostCreateEditFormTests(TestCase):
             data=form_data,
             follow=False
         )
-        response_post_detail = self.user_1_client.get(
-            reverse(
-                'posts:post_detail',
-                kwargs={'post_id': PostCreateEditFormTests.test_post.id}
-            )
-        )
-        context_comment = response_post_detail.context['comments'][1]
         self.assertEqual(comment_count + 1, Comment.objects.count())
-        last_post_comment = PostCreateEditFormTests.test_post.comments.all()[1]
-        self.assertEqual(
-            last_post_comment,
-            context_comment
+        self.assertTrue(
+            Comment.objects.filter(
+                text=form_data['text'],
+                author=PostCreateEditFormTests.user
+            ).exists()
         )
-
-    def test_cache(self):
-        """
-        Проверим, что до очистки кэша контент сохраняется даже
-        после принудительного удаления объекта из базы данных
-        """
-        response_1 = self.user_1_client.get(
-            reverse(
-                'posts:index'
-            )
-        )
-        PostCreateEditFormTests.test_post_2.delete()
-        response_2 = self.user_1_client.get(
-            reverse(
-                'posts:index'
-            )
-        )
-        self.assertEqual(response_1.content, response_2.content)
-        cache.clear()
-        response_3 = self.user_1_client.get(
-            reverse(
-                'posts:index'
-            )
-        )
-        self.assertNotEqual(response_1.content, response_3.content)

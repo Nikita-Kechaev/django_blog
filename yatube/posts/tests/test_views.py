@@ -1,18 +1,37 @@
 from django import forms
+import shutil
+import tempfile
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.core.cache import cache
-
-from posts.models import Group, Post
+from posts.models import Follow, Group, Post, Comment
 
 User = get_user_model()
 
+TEMP_MEDIA_ROOT = tempfile.mkdtemp(dir=settings.BASE_DIR)
 
+
+@override_settings(MEDIA_ROOT=TEMP_MEDIA_ROOT)
 class PostPagesTests(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        small_gif = (
+            b'\x47\x49\x46\x38\x39\x61\x02\x00'
+            b'\x01\x00\x80\x00\x00\x00\x00\x00'
+            b'\xFF\xFF\xFF\x21\xF9\x04\x00\x00'
+            b'\x00\x00\x00\x2C\x00\x00\x00\x00'
+            b'\x02\x00\x01\x00\x00\x02\x02\x0C'
+            b'\x0A\x00\x3B'
+        )
+        uploaded = SimpleUploadedFile(
+            name='small.gif',
+            content=small_gif,
+            content_type='image/gif'
+        )
         cls.user = User.objects.create_user(username='user')
         cls.user_author = User.objects.create_user(username='user_author')
         cls.group_1 = Group.objects.create(
@@ -26,7 +45,13 @@ class PostPagesTests(TestCase):
         cls.post = Post.objects.create(
             text='Тест №без номера',
             author=cls.user_author,
-            group=cls.group_2
+            group=cls.group_2,
+            image=uploaded
+        )
+        cls.comment = Comment.objects.create(
+            text='Тестовый комментарий №0 к тестовому посту',
+            author=cls.user,
+            post=cls.post
         )
         posts_list = [
             Post(
@@ -36,6 +61,11 @@ class PostPagesTests(TestCase):
             ) for i in range(13)
         ]
         Post.objects.bulk_create(posts_list)
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(TEMP_MEDIA_ROOT, ignore_errors=True)
 
     def setUp(self):
         self.guest_client = Client()
@@ -140,7 +170,7 @@ class PostPagesTests(TestCase):
         }
         for page_name, page_count in page_count_dict.items():
             with self.subTest():
-                response = self.guest_client.get(page_name)
+                response = self.authorized_client.get(page_name)
                 obj_count = len(
                     response.context.get(
                         'page_obj'
@@ -177,7 +207,7 @@ class PostPagesTests(TestCase):
         Проверяем, что передаём в view.profile верный context.
         """
         posts_list = list(PostPagesTests.user_author.posts.all()[:10])
-        respons = self.guest_client.get(
+        respons = self.authorized_client.get(
             reverse(
                 'posts:profile',
                 kwargs={'username': PostPagesTests.user_author}
@@ -192,6 +222,7 @@ class PostPagesTests(TestCase):
         корректная запись.
         """
         post = PostPagesTests.post
+        test_comment = post.comments.all()[0]
         response = self.guest_client.get(
             reverse(
                 'posts:post_detail',
@@ -199,7 +230,9 @@ class PostPagesTests(TestCase):
             )
         )
         obj = response.context.get('post')
+        obj_comment = obj.comments.all()[0]
         self.assertEqual(post, obj)
+        self.assertEqual(test_comment, obj_comment)
 
     def test_post_edit_form(self):
         """
@@ -268,11 +301,11 @@ class PostPagesTests(TestCase):
             'posts:group_list',
             kwargs={'slug': PostPagesTests.group_1.slug}
         )
-        response = self.guest_client.get(group_page_without_post)
+        response = self.authorized_client.get(group_page_without_post)
         obj_list = response.context.get('page_obj').paginator.object_list
         self.assertNotIn(post, obj_list)
         for page in page_list_with_post:
-            response = self.guest_client.get(page)
+            response = self.authorized_client.get(page)
             obj_list = response.context.get('page_obj').paginator.object_list
             with self.subTest():
                 self.assertIn(post, obj_list)
@@ -281,7 +314,23 @@ class PostPagesTests(TestCase):
         """
         Проверим, что созданный автором пост отображается
         в follower-ленте тех, кто подписан на данного автора,
-        и не отображается у тех, кто не подписан
+        """
+        Follow.objects.create(
+            user=PostPagesTests.user,
+            author=PostPagesTests.user_author
+        )
+        response = self.authorized_client.get(
+            reverse(
+                'posts:follow_index'
+            )
+        )
+        obj_list = response.context.get('page_obj').paginator.object_list
+        post = PostPagesTests.post
+        self.assertIn(post, obj_list)
+
+    def test_follow_unfollow(self):
+        """
+        Проверка follow и unfollow
         """
         self.authorized_client.get(
             reverse(
@@ -289,25 +338,21 @@ class PostPagesTests(TestCase):
                 kwargs={'username': PostPagesTests.user_author}
             )
         )
-        follow_post = Post.objects.create(
-            text='Тест №4 для проверки follow',
-            author=PostPagesTests.user_author,
+        self.assertTrue(
+            Follow.objects.filter(
+                user=PostPagesTests.user,
+                author=PostPagesTests.user_author
+            ).exists()
         )
-        response_auth_user_follow = self.authorized_client.get(
+        self.authorized_client.get(
             reverse(
-                'posts:follow_index'
+                'posts:profile_unfollow',
+                kwargs={'username': PostPagesTests.user_author}
             )
         )
-        response_auth_author_follow = self.author_post_client.get(
-            reverse(
-                'posts:follow_index'
-            )
+        self.assertFalse(
+            Follow.objects.filter(
+                user=PostPagesTests.user,
+                author=PostPagesTests.user_author
+            ).exists()
         )
-        obj_user_context = response_auth_user_follow.context.get(
-            'page_obj'
-        ).object_list
-        obj_author_context = response_auth_author_follow.context.get(
-            'page_obj'
-        ).object_list
-        self.assertIn(follow_post, obj_user_context)
-        self.assertNotIn(follow_post, obj_author_context)

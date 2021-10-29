@@ -14,6 +14,7 @@ def index(request):
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
     context = {
+        'index': True,
         'title': title,
         'page_obj': page_obj
     }
@@ -38,10 +39,7 @@ def post_detail(request, post_id):
     post = get_object_or_404(Post, id=post_id)
     post_title = post.text[:30]
     author_posts_count = post.author.posts.count()
-    form = CommentForm(
-        request.POST or None,
-        files=request.FILES or None
-    )
+    form = CommentForm()
     comments = post.comments.all()
     context = {
         'post': post,
@@ -57,21 +55,26 @@ def profile(request, username):
     template = 'posts/profile.html'
     user = request.user
     author = get_object_or_404(User, username=username)
-    is_follow = False
-    if user != author:
-        is_follow = True
-    following = False
-    if user.is_authenticated:
-        if user.follower.filter(author=author):
-            following = True
     author_posts_list = author.posts.all()
     author_posts_list_count = author_posts_list.count()
     paginator = Paginator(author_posts_list, 10)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
+    # Только так у меня получается реализовать логику
+    # чтобы неавторизированный тоже мог видеть профиль,
+    # но если захочет подписаться, то нужно войти/ зарег.
+    if user.is_authenticated:
+        following = user.follower.filter(
+            author=author
+        ).exists()
+        context = {
+            'following': following,
+            'author': author,
+            'author_posts_list_count': author_posts_list_count,
+            'page_obj': page_obj
+        }
+        return render(request, template, context)
     context = {
-        'is_follow': is_follow,
-        'following': following,
         'author': author,
         'author_posts_list_count': author_posts_list_count,
         'page_obj': page_obj
@@ -83,7 +86,10 @@ def profile(request, username):
 def post_create(request):
     template = 'posts/create_post.html'
     user = request.user
-    form = PostForm(request.POST or None)
+    form = PostForm(
+        request.POST or None,
+        files=request.FILES or None,
+    )
     if form.is_valid():
         form = form.save(commit=False)
         form.author = user
@@ -134,13 +140,13 @@ def follow_index(request):
     user = request.user
     title = 'Статьи авторов, на которых Вы подписаны.'
     template = 'posts/follow.html'
-    following = Follow.objects.filter(user=user)
-    authors_id = list(following.values_list('author_id'))
-    post = Post.objects.filter(author_id__in=authors_id)
-    paginator = Paginator(post, 10)
+    followers = user.follower.all().values('author')
+    posts = Post.objects.filter(author__in=followers)
+    paginator = Paginator(posts, 10)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
     context = {
+        'follow': True,
         'title': title,
         'page_obj': page_obj
     }
@@ -151,17 +157,11 @@ def follow_index(request):
 def profile_follow(request, username):
     user = request.user
     author = get_object_or_404(User, username=username)
-    follower = user.follower.all()
-    if user != author and author not in User.objects.filter(
-        following__in=follower
-    ):
-        Follow.objects.create(
-            user=user,
-            author=author
-        )
+    # без этого условия у меня не получается пройти автоматические тесты(
+    if user != author:
+        Follow.objects.get_or_create(user=user, author=author)
         return redirect('posts:profile', username=author)
-    return redirect('posts:profile', username=author)
-
+    return redirect('posts:profile', username=author) 
 
 @login_required
 def profile_unfollow(request, username):
