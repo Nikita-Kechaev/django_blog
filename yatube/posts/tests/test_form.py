@@ -184,6 +184,7 @@ class PostCreateEditFormTests(TestCase):
         self.assertEqual(comment_count + 1, Comment.objects.count())
         self.assertTrue(
             Comment.objects.filter(
+                post=PostCreateEditFormTests.test_post,
                 text=form_data['text'],
                 author=PostCreateEditFormTests.user
             ).exists()

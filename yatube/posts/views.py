@@ -60,21 +60,11 @@ def profile(request, username):
     paginator = Paginator(author_posts_list, 10)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
-    # Только так у меня получается реализовать логику
-    # чтобы неавторизированный тоже мог видеть профиль,
-    # но если захочет подписаться, то нужно войти/ зарег.
-    if user.is_authenticated:
-        following = user.follower.filter(
-            author=author
-        ).exists()
-        context = {
-            'following': following,
-            'author': author,
-            'author_posts_list_count': author_posts_list_count,
-            'page_obj': page_obj
-        }
-        return render(request, template, context)
+    following = user.is_authenticated and user.follower.filter(
+        author=author
+    ).exists()
     context = {
+        'following': following,
         'author': author,
         'author_posts_list_count': author_posts_list_count,
         'page_obj': page_obj
@@ -140,8 +130,7 @@ def follow_index(request):
     user = request.user
     title = 'Статьи авторов, на которых Вы подписаны.'
     template = 'posts/follow.html'
-    followers = user.follower.all().values('author')
-    posts = Post.objects.filter(author__in=followers)
+    posts = Post.objects.filter(author__following__user=user)
     paginator = Paginator(posts, 10)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)

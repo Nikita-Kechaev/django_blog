@@ -328,7 +328,7 @@ class PostPagesTests(TestCase):
         post = PostPagesTests.post
         self.assertIn(post, obj_list)
 
-    def test_follow_unfollow(self):
+    def test_follow(self):
         """
         Проверка follow и unfollow
         """
@@ -343,6 +343,12 @@ class PostPagesTests(TestCase):
                 user=PostPagesTests.user,
                 author=PostPagesTests.user_author
             ).exists()
+        )
+
+    def test_unfollow(self):
+        Follow.objects.create(
+            user=PostPagesTests.user,
+            author=PostPagesTests.user_author
         )
         self.authorized_client.get(
             reverse(

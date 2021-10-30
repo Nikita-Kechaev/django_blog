@@ -69,11 +69,6 @@ class Follow(models.Model):
     )
 
     class Meta:
-        # я не понял этот метод(
-        # по сути, если мы его применяем,мы в шаблоне prfoile
-        # можем не проверять условие {% if user != author %}?
-        # и далее методы condition, deferrable... тоже не понятны(
-        # Можете дать ссылку на какой нибудь хороший пример?
         constraints = [
             models.UniqueConstraint(
                 fields=['user', 'author'],
