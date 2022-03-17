@@ -9,7 +9,7 @@
       {{ title }} 
     </h1>
     {% load cache %}
-    {% cache 20 index_page %}
+    {% cache 0 index_page %}
     {% for post in page_obj %}
       {% include 'includes/article.html' %}
       {% if post.group %}
